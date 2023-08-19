@@ -1,10 +1,12 @@
 ## Imports
+import json
 
 import discord
 from discord.ext import commands
 
 import sqlalchemy
 from sqlalchemy import Column, Integer, String, BigInteger
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import declarative_base
 
 intents = discord.Intents.default()
@@ -29,6 +31,29 @@ class User(Base):
 
     def __repr__(self):
         return "<User(idUser={}, idGuild={}, pdl={})".format(self.idUser,self.IdGuild,self.pdl)
+    
+
+
+class Partida(Base):
+    __tablename__ = 'partidas'
+
+    idPartida = Column(Integer, primary_key=True)
+    vencedor = Column(String)
+    equipe1 = Column(String) 
+    equipe2 = Column(String)
+
+    def __init__(self, equipe1, equipe2):
+        self.equipe1 = json.dumps(equipe1)
+        self.equipe2 = json.dumps(equipe2)
+
+    def get_equipe1(self):
+        return json.loads(self.equipe1)
+
+    def get_equipe2(self):
+        return json.loads(self.equipe2)
+
+    def __repr__(self):
+        return "<User(idPartida={}, equipe1={},equipe2={}, ganhador={})".format(self.idPartida,self.equipe1,self.equipe2,self.vencedor)
 
 Base.metadata.create_all(engine)
 
@@ -57,18 +82,31 @@ async def queue(ctx):
         session.commit()
 
     actualQueue.append(ctx.author)
+
     await ctx.send(f'{ctx.author.mention} foi adicionado à fila.')
-    # if len(actualQueue) >= 10:
-    #     start(actualQueue[:10])
+    if len(actualQueue) >= 2:
+        await startPartida(actualQueue[:2], ctx)
 
 @client.command()
 async def show_queue(ctx):
     queue_list = "\n".join([member.name for member in actualQueue])
     await ctx.send(f"Jogadores na fila:\n{queue_list}")
 
-# def start(players):
-#     time1 = []
-#     time2 = []
+async def startPartida(players,ctx):
+    time1 = players[:1]
+    time2 = players[1:]
+
+    time1_mention = ", ".join([player.mention for player in time1])
+    time2_mention = ", ".join([player.mention for player in time2])
+
+    message = "Times criados:\n"
+    message += f"Time 1: {time1_mention}\n"
+    message += f"Time 2: {time2_mention}"
+
+    # Enviar a mensagem para o canal
+    # Certifique-se de que você tenha o contexto (ctx) disponível para enviar a mensagem
+    # ctx é o contexto do comando original que invocou a função startPartida
+    await ctx.send(message)
 
 
 ## Startando Bot
