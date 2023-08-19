@@ -18,7 +18,11 @@ OBS: aquele TOKEN não eh meu mais, nem tente desconfigurar meu Bot.
 # Comandos:
 
 t!go -> Entra na Queue
+
 t!queue -> Vê os jogadores na Queue
+
 t!leave -> Sai da Queue
+
 t!rank -> Vê o rank geral dos Players/Users
+
 t!end {id_partida} {time_vencedor} -> escrever o id da partida aberta e qual eh o tima vencedor para contabilizar os pdl
