@@ -30,8 +30,18 @@ class User(Base):
     lose = Column(Integer)
     pdl = Column(Integer)
 
+    def to_dict(self):
+        return {
+            "idUser": self.idUser,
+            "IdGuild": self.IdGuild,
+            "nome": self.nome,
+            "win": self.win,
+            "lose": self.lose,
+            "pdl": self.pdl
+        }
+
     def __repr__(self):
-        return "<User(idUser={}, idGuild={}, pdl={})".format(self.idUser,self.IdGuild,self.pdl)
+        return "<User(idUser={}, idGuild={}, nome={}, pdl={})".format(self.idUser,self.IdGuild,self.nome,self.pdl)
     
 
 class Partida(Base):
@@ -43,14 +53,14 @@ class Partida(Base):
     time2 = Column(String)
 
     def __init__(self, time1, time2):
-        self.time1 = json.dumps(time1)
-        self.time2 = json.dumps(time2)
+        self.time1 = json.dumps([user.to_dict() for user in time1])
+        self.time2 = json.dumps([user.to_dict() for user in time2])
 
     def get_time1(self):
-        return json.loads(self.time1)
+        return [User(**data) for data in json.loads(self.time1)]
 
     def get_time2(self):
-        return json.loads(self.time2)
+        return [User(**data) for data in json.loads(self.time2)]
 
     def __repr__(self):
         return "<User(idPartida={}, time1={},time2={}, ganhador={})".format(self.idPartida,self.time1,self.time2,self.vencedor)
@@ -70,7 +80,6 @@ async def on_ready():
 async def go(ctx):
     guild_id = ctx.guild.id
 
-    # Verifique se a guilda já possui uma fila, senão crie uma
     if guild_id not in guild_queues:
         guild_queues[guild_id] = []
 
@@ -81,15 +90,15 @@ async def go(ctx):
     user = session.query(User).filter_by(idUser=user_id, IdGuild=guild_id).first()
 
     if not user:
-        new_user = User(idUser=user_id, IdGuild=guild_id, nome=ctx.author.name, win=0, lose=0, pdl=20)
-        session.add(new_user)
+        user = User(idUser=user_id, IdGuild=guild_id, nome=ctx.author.name, win=0, lose=0, pdl=20)
+        session.add(user)
         session.commit()
 
-    if ctx.author in guild_queues[guild_id]:
-        await ctx.send(f'{ctx.author.mention} já está na fila.')
-    else:
-        guild_queues[guild_id].append(ctx.author)
+    if user.idUser not in (member.idUser for member in guild_queues[guild_id]):
+        guild_queues[guild_id].append(user)
         await ctx.send(f'{ctx.author.mention} foi adicionado à fila.')
+    else:
+        await ctx.send(f'{ctx.author.mention} já está na fila.')     
 
     await queue(ctx)
 
@@ -100,15 +109,20 @@ async def go(ctx):
 @client.command()
 async def leave(ctx):
     guild_id = ctx.guild.id
-    user_id = ctx.author
+    user_id = ctx.author.id
 
-    if user_id in guild_queues[guild_id]:
-        guild_queues[guild_id].remove(user_id)
-        await ctx.send(f"{ctx.author.mention} saiu da fila.")
+    session = sqlalchemy.orm.sessionmaker(bind=engine)()
+    
+    user = session.query(User).filter_by(idUser=user_id, IdGuild=guild_id).first()
+
+    if user and user.idUser in [member.idUser for member in guild_queues.get(guild_id, [])]:
+        guild_queues[guild_id] = [member for member in guild_queues[guild_id] if member.idUser != user.idUser]
+        await ctx.send(f'{ctx.author.mention} saiu da fila.')
     else:
-        await ctx.send(f"{ctx.author.mention} não está na fila.")
+        await ctx.send(f'{ctx.author.mention} nao esta na fila.')
 
     await queue(ctx)
+
 
 @client.command()
 async def queue(ctx):
@@ -118,22 +132,31 @@ async def queue(ctx):
         await ctx.send("Nenhum jogador na fila.")
         return
 
-    queue_list = "\n".join([member.name for member in guild_queues[guild_id]])
+    print(guild_queues[guild_id])
+    queue_list = "\n".join(user.nome for user in guild_queues[guild_id])
     await ctx.send(f"Jogadores na fila:\n{queue_list}")
 
 async def startPartida(players, ctx):
+    session = sqlalchemy.orm.sessionmaker(bind=engine)()
     
-    time1 = [player.id for player in players[:1]]
-    time2 = [player.id for player in players[1:]]
+    players.sort(key=lambda player: player.pdl, reverse=True)
+
+    time1 = []
+    time2 = []
+
+    for index, player in enumerate(players):
+        if index % 2 == 0:
+            time1.append(player)
+        else:
+            time2.append(player)
 
     partida = Partida(time1, time2)
 
-    session = sqlalchemy.orm.sessionmaker(bind=engine)()
     session.add(partida)
     session.commit()
 
-    time1_mention = ", ".join([player.mention for player in players[:1]])
-    time2_mention = ", ".join([player.mention for player in players[1:]])
+    time1_mention = ", ".join([player.nome for player in time1])
+    time2_mention = ", ".join([player.nome for player in time2])
 
     message = "Times criados:\n"
     message += f"Id da Partida = {partida.idPartida}\n"
@@ -173,29 +196,25 @@ async def end(ctx, id_partida: int, time_vencedor: str):
     session.commit()
 
     equipe_vencedora = partida.get_time1() if time_vencedor == 'time1' else partida.get_time2()
+    equipe_perdedora = partida.get_time2() if time_vencedor == 'time1' else partida.get_time1()
 
     vencedores = []
 
-    # Atualizar vitórias e derrotas dos usuários
-    for user_id in partida.get_time1() + partida.get_time2():
-        user = session.query(User).filter_by(idUser=user_id, IdGuild=ctx.guild.id).first()
+    for user in equipe_vencedora:
+        userAtt = session.query(User).filter_by(idUser=user.idUser, IdGuild=ctx.guild.id).first()
+        userAtt.win += 1
+        userAtt.pdl += 7
+        vencedores.append(userAtt)
+        session.commit()
 
-        if user:
-            if user_id in partida.get_time1() and time_vencedor == 'time1':
-                user.win += 1
-                user.pdl += 7
-                vencedores.append(user)
-            elif user_id in partida.get_time2() and time_vencedor == 'time2':
-                user.win += 1
-                user.pdl += 7
-                vencedores.append(user)
-            else:
-                user.lose += 1
-                user.pdl -= 7
-                if user.pdl < 0:
-                    user.pdl = 0
-
-    session.commit()
+    for user in equipe_perdedora:
+        userAtt = session.query(User).filter_by(idUser=user.idUser, IdGuild=ctx.guild.id).first()
+        userAtt.pdl -= 7
+        userAtt.lose += 1
+        
+        if userAtt.pdl < 0:
+                userAtt.pdl = 0
+        session.commit()
 
     mensagem = "\n".join([vencedor.nome for vencedor in vencedores])
 
@@ -203,4 +222,4 @@ async def end(ctx, id_partida: int, time_vencedor: str):
     await ctx.send(f"Partida {id_partida} encerrada. Time vencedor: {mensagem}")
 
 ## Startando Bot
-client.run("MTE0MjIwMDkwMTU2NjcyNjE0NA.GIDm8X.GkOmoPQO15-c0PJMnWwClqtgUZ5GzHiS_1rSOI")
+client.run("MTE0MjIwMDkwMTU2NjcyNjE0NA.G-rtme._7jYoevo2tJk5cn2cc5RwIyy8sZ99xj1ics8gQ")
