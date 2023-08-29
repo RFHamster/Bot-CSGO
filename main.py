@@ -13,6 +13,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = commands.Bot(command_prefix='t!', intents=intents)
 
+## Id's dos Admin
+admin = [248549066672308225, 330553991433945088, 355120851970031628]
 
 ## Banco De Dados
 
@@ -55,6 +57,7 @@ class Partida(Base):
     def __init__(self, time1, time2):
         self.time1 = json.dumps([user.to_dict() for user in time1])
         self.time2 = json.dumps([user.to_dict() for user in time2])
+        self.vencedor = None
 
     def get_time1(self):
         return [User(**data) for data in json.loads(self.time1)]
@@ -102,9 +105,9 @@ async def go(ctx):
 
     await queue(ctx)
 
-    if len(guild_queues[guild_id]) >= 2:
-        await startPartida(guild_queues[guild_id][:2], ctx)
-        guild_queues[guild_id][:2] = []
+    if len(guild_queues[guild_id]) >= 10:
+        await startPartida(guild_queues[guild_id][:10], ctx)
+        guild_queues[guild_id][:10] = []
 
 @client.command()
 async def leave(ctx):
@@ -180,17 +183,34 @@ async def rank(ctx):
 
 @client.command()
 async def end(ctx, id_partida: int, time_vencedor: str):
-    session = sqlalchemy.orm.sessionmaker(bind=engine)()
 
-    partida = session.query(Partida).filter_by(idPartida=id_partida).first()
-
-    if not partida:
-        await ctx.send(f"Partida com ID {id_partida} não encontrada.")
+    if ctx.author.id not in admin:
         return
-
-    if time_vencedor not in ['time1', 'time2']:
-        await ctx.send("Time vencedor inválido. Use 'time1' ou 'time2'.")
-        return
+    
+    try:
+      session = sqlalchemy.orm.sessionmaker(bind=engine)()
+  
+      partida = session.query(Partida).filter_by(idPartida=id_partida).first()
+  
+      if not partida:
+          await ctx.send(f"Partida com ID {id_partida} não encontrada.")
+          return
+      if partida.vencedor is not None:
+          await ctx.send(f"Partida com ID {id_partida} já encerrada.")
+          return
+      if time_vencedor not in ['time1', 'time2']:
+          await ctx.send("Time vencedor inválido. Use 'time1' ou 'time2'.")
+          return
+  
+      partida.vencedor = time_vencedor
+      session.commit()
+      await ctx.send(f"Partida com ID {id_partida} encerrada. Time vencedor: {time_vencedor}")
+    except Exception as e:
+      await ctx.send("Ocorreu um erro ao encerrar a partida.")
+      session.close()
+      print(e)
+      return
+        
 
     partida.vencedor = time_vencedor
     session.commit()
